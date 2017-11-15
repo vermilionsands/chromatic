@@ -7,11 +7,11 @@
   (apply [_ x] (f x)))
 
 (defprotocol DistributedAtom
-  (set-shared-validator [_ f])
-  (get-shared-validator [_])
-  (add-shared-watch [_ k f])
-  (remove-shared-watch [_ k])
-  (get-shared-watches [_]))
+  (set-shared-validator [this f])
+  (get-shared-validator [this])
+  (add-shared-watch [this k f])
+  (remove-shared-watch [this k])
+  (get-shared-watches [this]))
 
 (defn- validate [f x]
   (try
@@ -38,14 +38,14 @@
            new-val#)
          (recur ~f ~@args)))))
 
-(defn- assoc-shared-validator-fn [f]
-  (->HazelcastFn #(assoc % :validator f)))
+(defn- assoc-validator [f m]
+  (assoc m :validator f))
 
-(defn- assoc-shared-watch-fn [k f]
-  (->HazelcastFn #(update-in % [:watches k] f)))
+(defn- assoc-shared-watch [k f m]
+  (update-in m [:watches k] f))
 
-(defn- remove-shared-watch-fn [k]
-  (->HazelcastFn #(update % :watches dissoc k)))
+(defn- remove-shared-watch [k m]
+  (update m :watches dissoc k))
 
 (deftype ValueBasedHazelcastAtom [state notification-topic shared-ctx local-ctx]
   IAtom
@@ -116,17 +116,17 @@
   DistributedAtom
   (set-shared-validator [this f]
     (validate f (deref this))
-    (.alter ^IAtomicReference shared-ctx (assoc-shared-validator-fn f)))
+    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial assoc-validator f))))
 
   (get-shared-validator [_]
     (:validator (.get shared-ctx)))
 
   (add-shared-watch [this k f]
-    (.alter ^IAtomicReference shared-ctx (assoc-shared-watch-fn k f))
+    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial assoc-shared-watch k f)))
     this)
 
   (remove-shared-watch [this k]
-    (.alter ^IAtomicReference shared-ctx (remove-shared-watch-fn k))
+    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial remove-shared-watch k)))
     this)
 
   (get-shared-watches [_]
