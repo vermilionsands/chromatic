@@ -1,4 +1,4 @@
-(defproject chromatic "0.1.0"
+(defproject chromatic "0.0.1"
   :description "Distributed atom-like reference type backed by Hazelcast"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
