@@ -190,11 +190,14 @@
         (.destroy lock)
         {:state state :ctx ctx :notifications notifications}))))
 
-;; todo extend id to something more unique
+(defn- atom-id [id]
+  (str "chromatic-atom-" (name id)))
+
 (defn distributed-atom
   ""
   [^HazelcastInstance instance id x & [opts]]
-  (let [{:keys [global-notifications]} opts
+  (let [id (atom-id id)
+        {:keys [global-notifications]} opts
         {:keys [state ctx notifications]}
         (if-not (find-reference instance id)
           (or (init-shared-objects instance id x global-notifications)
