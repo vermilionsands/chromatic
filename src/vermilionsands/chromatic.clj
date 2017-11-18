@@ -1,19 +1,44 @@
 (ns vermilionsands.chromatic
-  (:import [com.hazelcast.core IAtomicReference HazelcastInstance ITopic MessageListener IFunction]
-           [clojure.lang IDeref IAtom IRef IReference IMeta]))
+  (:import [clojure.lang IAtom IDeref IMeta IRef IReference]
+           [com.hazelcast.config Config]
+           [com.hazelcast.core HazelcastInstance IAtomicReference IFunction ITopic MessageListener]
+           [com.hazelcast.topic TopicOverloadPolicy]))
+
+(def ^:private reference-service-name  "hz:impl:atomicReferenceService")
 
 (deftype HazelcastFn [f]
   IFunction
   (apply [_ x] (f x)))
 
-(defprotocol DistributedAtom
-  (set-shared-validator [this f])
-  (get-shared-validator [this])
-  (add-shared-watch [this k f])
-  (remove-shared-watch [this k])
-  (get-shared-watches [this]))
+(defn- hazelcast-fn
+  ([f]
+   (->HazelcastFn f))
+  ([f x & args]
+   (->HazelcastFn (apply partial f x args))))
 
-(defn- validate [f x]
+(defprotocol DistributedAtom
+  (set-shared-validator! [this f]
+    "Like clojure.core/set-validator! but sets a validator that would be shared among all instances.
+    Validator function has to be available on all instances using this atom.")
+
+  (get-shared-validator [this]
+    "Returns shared validator for this atom.")
+
+  (add-shared-watch [this k f]
+    "Like clojure.core/add-watch but the watch would be shared amon all instances, and would be executed on
+    each instane upon notification.
+    Watch function should has to be avaialable on all instances using this atom.")
+
+  (remove-shared-watch [this k]
+    "Removes shared watch under key k.")
+
+  (get-shared-watches [this]
+    "Returns shared watches for this atom."))
+
+(defn- validate
+  "Executes f on x and throws an exception if result is false, or rethrows an exception.
+  Otherwise returns nil."
+  [f x]
   (try
     (when (and f (false? (f x)))
       (throw (IllegalStateException. "Invalid reference state!")))
@@ -23,20 +48,25 @@
       (throw (IllegalStateException. "Invalid reference state!" e)))))
 
 (defn- notify [hazelcast-atom old-val new-val]
-  (.publish ^ITopic (.-notification_topic hazelcast-atom) [old-val new-val]))
+  (if-let [topic (.-notification_topic hazelcast-atom)]
+    (.publish ^ITopic topic [old-val new-val])
+    (doseq [[k f] (concat (.getWatches hazelcast-atom) (get-shared-watches hazelcast-atom))]
+      (when f
+        (f k hazelcast-atom old-val new-val)))))
 
-(defmacro ^:private swap* [this f & args]
-  (let [[_ _ rest] args
-        f (if rest (list 'apply f) (list f))]
-    `(let [old-val# (deref ~this)
-           new-val# (~@f old-val# ~@args)]
-       (validate (:validator @~'local-ctx) new-val#)
-       (validate (:validator (.get ~'shared-ctx)) new-val#)
-       (if (.compareAndSet ~'state old-val# new-val#)
-         (do
-           (notify ~this old-val# new-val#)
-           new-val#)
-         (recur ~f ~@args)))))
+(defn- value-swap* [hazelcast-atom f args]
+  (let [[x y rest] args
+        old-val (deref hazelcast-atom)
+        new-val (if rest
+                  (apply f old-val x y rest)
+                  (apply f old-val args))]
+    (doseq [g [(deref (.-local_ctx hazelcast-atom)) (.get ^IAtomicReference (.-shared_ctx hazelcast-atom))]]
+      (validate (:validator g) new-val))
+    (if (.compareAndSet ^IAtomicReference (.-state hazelcast-atom) old-val new-val)
+      (do
+        (notify hazelcast-atom old-val new-val)
+        new-val)
+      (recur hazelcast-atom f args))))
 
 (defn- assoc-validator [f m]
   (assoc m :validator f))
@@ -47,19 +77,19 @@
 (defn- remove-shared-watch [k m]
   (update m :watches dissoc k))
 
-(deftype ValueBasedHazelcastAtom [state notification-topic shared-ctx local-ctx]
+(deftype HazelcastAtom [state notification-topic shared-ctx local-ctx]
   IAtom
   (swap [this f]
-    (swap* this f))
+    (value-swap* this f nil))
 
   (swap [this f x]
-    (swap* this f x))
+    (value-swap* this f [x]))
 
   (swap [this f x y]
-    (swap* this f x y))
+    (value-swap* this f [x y]))
 
   (swap [this f x y args]
-    (swap* this f x y args))
+    (value-swap* this f [x y args]))
 
   (compareAndSet [this old-val new-val]
     (validate (:validator @local-ctx) new-val)
@@ -114,39 +144,70 @@
   (deref [_] (.get state))
 
   DistributedAtom
-  (set-shared-validator [this f]
+  (set-shared-validator! [this f]
     (validate f (deref this))
-    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial assoc-validator f))))
+    (.alter ^IAtomicReference shared-ctx (hazelcast-fn assoc-validator f)))
 
   (get-shared-validator [_]
     (:validator (.get shared-ctx)))
 
   (add-shared-watch [this k f]
-    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial assoc-shared-watch k f)))
+    (.alter ^IAtomicReference shared-ctx (hazelcast-fn assoc-shared-watch k f))
     this)
 
   (remove-shared-watch [this k]
-    (.alter ^IAtomicReference shared-ctx (->HazelcastFn (partial remove-shared-watch k)))
+    (.alter ^IAtomicReference shared-ctx (hazelcast-fn remove-shared-watch k))
     this)
 
   (get-shared-watches [_]
     (:watches (.get shared-ctx))))
 
+(defn- find-reference [^HazelcastInstance instance id]
+  (->> (.getDistributedObjects instance)
+       (filter
+           #(and (= (.getServiceName %) reference-service-name)
+                 (= (.getName %) id)))
+       first))
+
+(defn- retrieve-shared-objects [instance id notifications?]
+  {:state         (.getAtomicReference instance id)
+   :ctx           (.getAtomicReference instance (str id "-ctx"))
+   :notifications (when notifications? (.getReliableTopic instance id))})
+
+(defn- init-shared-objects [instance id init notifications?]
+  (let [lock (.getLock instance id)]
+    (when (find-reference instance id)
+      (let [state         (.getAtomicReference instance id)
+            ctx           (.getAtomicReference instance (str id "-ctx"))
+            notifications (when notifications? (.getReliableTopic instance id))]
+        (.set ^IAtomicReference state init)
+        (-> (.getReliableTopicConfig (Config.) id)
+            (.setTopicOverloadPolicy TopicOverloadPolicy/DISCARD_OLDEST)
+            (.setStatisticsEnabled false))
+        (.destroy lock)
+        {:state state :ctx ctx :notifications notifications}))))
+
+;; todo extend id to something more unique
 (defn distributed-atom
   ""
-  [^HazelcastInstance instance id x]
-  (let [state (.getAtomicReference instance id)
-        shared-ctx (.getAtomicReference instance (str id "-ctx"))
-        local-ctx (atom {})
-        notification-topic (.getReliableTopic instance id)
-        atom (->ValueBasedHazelcastAtom state notification-topic shared-ctx local-ctx)]
-    (.addMessageListener notification-topic
-      (reify MessageListener
-        (onMessage [_ message]
-          (let [[old-val new-val] (.getMessageObject message)]
-            (doseq [[k f] (.getWatches atom)]
-              (when f
-                (f k atom old-val new-val)))))))
-    (when-not @atom
-      (reset! atom x))
-    atom))
+  [^HazelcastInstance instance id x & [opts]]
+  (let [{:keys [global-notification]
+         :or {:global-notification false}} opts
+        {:keys [state ctx notifications]}
+        (if-not (find-reference instance id)
+          (or (init-shared-objects instance id x global-notification)
+              (retrieve-shared-objects instance id global-notification))
+          (retrieve-shared-objects instance id global-notification))
+        hazelcast-atom (->HazelcastAtom state notifications ctx (atom {}))]
+
+    ;; todo add a way to remove/deregister somehow
+    (when notifications
+      (.addMessageListener notifications
+        (reify MessageListener
+          (onMessage [_ message]
+            (let [[old-val new-val] (.getMessageObject message)]
+              (doseq [[k f] (concat (.getWatches hazelcast-atom) (get-shared-watches hazelcast-atom))]
+                (when f
+                  (f k hazelcast-atom old-val new-val))))))))
+
+    hazelcast-atom))
