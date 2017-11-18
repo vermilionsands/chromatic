@@ -169,21 +169,24 @@
                  (= (.getName %) id)))
        first))
 
-(defn- retrieve-shared-objects [instance id notifications?]
-  {:state         (.getAtomicReference instance id)
-   :ctx           (.getAtomicReference instance (str id "-ctx"))
-   :notifications (when notifications? (.getReliableTopic instance id))})
+(defn- retrieve-shared-objects [instance id]
+  (let [state         (.getAtomicReference instance id)
+        ctx           (.getAtomicReference instance (str id "-ctx"))
+        notifications (when (:notifications? (.get ctx)) (.getReliableTopic instance id))]
+    {:state state :ctx ctx :notifications notifications}))
 
 (defn- init-shared-objects [instance id init notifications?]
   (let [lock (.getLock instance id)]
-    (when (find-reference instance id)
+    (when-not (find-reference instance id)
       (let [state         (.getAtomicReference instance id)
             ctx           (.getAtomicReference instance (str id "-ctx"))
             notifications (when notifications? (.getReliableTopic instance id))]
         (.set ^IAtomicReference state init)
-        (-> (.getReliableTopicConfig (Config.) id)
-            (.setTopicOverloadPolicy TopicOverloadPolicy/DISCARD_OLDEST)
-            (.setStatisticsEnabled false))
+        (.set ^IAtomicReference ctx {:notifications? notifications?})
+        (when notifications?
+          (-> (.getReliableTopicConfig (Config.) id)
+              (.setTopicOverloadPolicy TopicOverloadPolicy/DISCARD_OLDEST)
+              (.setStatisticsEnabled false)))
         (.destroy lock)
         {:state state :ctx ctx :notifications notifications}))))
 
@@ -191,13 +194,12 @@
 (defn distributed-atom
   ""
   [^HazelcastInstance instance id x & [opts]]
-  (let [{:keys [global-notification]
-         :or {:global-notification false}} opts
+  (let [{:keys [global-notifications]} opts
         {:keys [state ctx notifications]}
         (if-not (find-reference instance id)
-          (or (init-shared-objects instance id x global-notification)
-              (retrieve-shared-objects instance id global-notification))
-          (retrieve-shared-objects instance id global-notification))
+          (or (init-shared-objects instance id x global-notifications)
+              (retrieve-shared-objects instance id))
+          (retrieve-shared-objects instance id))
         hazelcast-atom (->HazelcastAtom state notifications ctx (atom {}))]
 
     ;; todo add a way to remove/deregister somehow
@@ -211,3 +213,11 @@
                   (f k hazelcast-atom old-val new-val))))))))
 
     hazelcast-atom))
+
+(defn destroy!
+  "Destroys atom state objects cluster-wide."
+  [hazelcast-atom]
+  (when-let [topic (.-notification_topic hazelcast-atom)]
+    (.destroy ^ITopic topic))
+  (.destroy ^IAtomicReference (.-local_ctx hazelcast-atom))
+  (.destroy ^IAtomicReference (.state hazelcast-atom)))
