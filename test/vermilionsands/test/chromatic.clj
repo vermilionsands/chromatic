@@ -53,3 +53,12 @@
     (is (= 0 @a))
     (reset! a 1)
     (is (= 1 @a))))
+
+(deftest meta-test
+  (let [a (chromatic/distributed-atom hazelcast-instance "meta-test" 0)
+        m {:test :meta}]
+    (is (nil? (meta a)))
+    (reset-meta! a m)
+    (is (= m (meta a)))
+    (alter-meta! a assoc :altered :key)
+    (is (= {:test :meta :altered :key} (meta a)))))
