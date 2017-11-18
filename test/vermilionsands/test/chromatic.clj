@@ -62,3 +62,10 @@
     (is (= m (meta a)))
     (alter-meta! a assoc :altered :key)
     (is (= {:test :meta :altered :key} (meta a)))))
+
+(deftest meta-is-per-instance-test
+  (let [a (chromatic/distributed-atom hazelcast-instance "meta-test" 0)
+        b (chromatic/distributed-atom hazelcast-instance "meta-test" 0)]
+    (reset-meta! a {:test :meta})
+    (is (= {:test :meta} (meta a)))
+    (is (nil? (meta b)))))
