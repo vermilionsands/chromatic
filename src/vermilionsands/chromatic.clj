@@ -130,7 +130,7 @@
     (:validator @local-ctx))
 
   (addWatch [this k f]
-    (swap! local-ctx update :watches conj k f)
+    (swap! local-ctx update :watches assoc k f)
     this)
 
   (removeWatch [this k]
@@ -138,7 +138,7 @@
     this)
 
   (getWatches [_]
-    (:wathes @local-ctx))
+    (:watches @local-ctx))
 
   IDeref
   (deref [_] (.get state))

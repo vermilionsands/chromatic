@@ -79,11 +79,15 @@
     (is (= {:test :meta} (meta a)))
     (is (nil? (meta b)))))
 
+;; todo add set nil validator test
 (deftest validator-test
   (testing "Local validator is not shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
-          b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)]
-      (set-validator! a (partial > 10))
+          b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
+          validator (partial > 10)]
+      (set-validator! a validator)
+      (is (= validator (get-validator a)))
+      (is (nil? (get-validator b)))
       (swap! a inc)
       (is (= 1 @a))
       (is (thrown? IllegalStateException (swap! a + 10)))
@@ -94,11 +98,52 @@
       (is (= 11 @b))))
   (testing "Shared validator is shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
-          b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)]
-      (chromatic/set-shared-validator! a (partial > 10))
+          b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
+          validator (partial > 10)]
+      (chromatic/set-shared-validator! a validator)
       (swap! a inc)
       (is (= 1 @a))
       (is (thrown? IllegalStateException (swap! a + 10)))
       (is (thrown? IllegalStateException (swap! b + 10)))
       (is (= 1 @a))
-      (is (= 1 @b)))))
+      (is (= 1 @b))))
+  (testing "Both shared and local validators are called"
+    (let [a (chromatic/distributed-atom hazelcast-instance "mixed-validator-test" 0)]
+      (set-validator! a even?)
+      (chromatic/set-shared-validator! a (partial > 4))
+      ;; shared validator kicks in
+      (is (thrown? IllegalStateException (swap! a + 10)))
+      ;; local validator kicks in
+      (is (thrown? IllegalStateException (swap! a + 1))))))
+
+(defn- watch-and-store []
+  (let [a (atom [])]
+    [(fn [k x old-val new-val]
+      (swap! a conj [old-val new-val]))
+     a]))
+
+(deftest watch-test
+  (testing "Local watch test without notification test"
+    (let [a (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
+          b (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
+          [watch-a state-a] (watch-and-store)
+          [watch-b state-b] (watch-and-store)]
+      (add-watch a :1 watch-a)
+      (add-watch b :1 watch-b)
+      (is (= {:1 watch-a} (.getWatches a)))
+      (is (= {:1 watch-b} (.getWatches b)))
+      (swap! a inc)
+      (is (= 1 (count @state-a)))
+      (is (= [0 1] (first @state-a)))
+      (is (empty? @state-b)))))
+;  (testing "Local watch with notification test"
+;    (let [a (chromatic/distributed-atom hazelcast-instance "notification-test" 0 {:global-notifications true})
+;          b (chromatic/distributed-atom hazelcast-instance "notification-test" 0)
+;          [watch-a state-a] (watch-and-store)
+;          [watch-b state-b] (watch-and-store))
+;      (add-watch a :1 watch-a)
+;      (add-watch b :1 watch-b)
+;      (swap! a inc)
+;      (is (= 1 (count @state-a)))
+;      (is (= [0 1] (first @state-a)))
+;      (is (= @state-a @state-b)))))
