@@ -54,6 +54,15 @@
     (reset! a 1)
     (is (= 1 @a))))
 
+(deftest two-instances-test
+  (let [a (chromatic/distributed-atom hazelcast-instance "two-instances-test" 0)
+        b (chromatic/distributed-atom hazelcast-instance "two-instances-test" 0)]
+    (is (zero? @a))
+    (is (zero? @b))
+    (swap! a inc)
+    (is (= 1 @a))
+    (is (= 1 @b))))
+
 (deftest meta-test
   (let [a (chromatic/distributed-atom hazelcast-instance "meta-test" 0)
         m {:test :meta}]
@@ -69,3 +78,27 @@
     (reset-meta! a {:test :meta})
     (is (= {:test :meta} (meta a)))
     (is (nil? (meta b)))))
+
+(deftest validator-test
+  (testing "Local validator is not shared between instances"
+    (let [a (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
+          b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)]
+      (set-validator! a (fn [x] (< x 10)))
+      (swap! a inc)
+      (is (= 1 @a))
+      (is (thrown? IllegalStateException (swap! a + 10)))
+      (is (= 1 @a))
+      (is (= 1 @b))
+      (swap! b + 10)
+      (is (= 11 @a))
+      (is (= 11 @b)))))
+;  (testing "Shared validator is shared between instances"
+;    (let [a (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
+;          b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0))
+;      (chromatic/set-shared-validator! a (fn [x] (< x 10)))
+;      (swap! a inc)
+;      (is (= 1 @a))
+;      (is (thrown? IllegalStateException (swap! a + 10)))
+;      (is (thrown? IllegalStateException (swap! b + 10)))
+;      (is (= 1 @a))
+;      (is (= 1 @b)))))

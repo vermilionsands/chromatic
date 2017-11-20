@@ -5,4 +5,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.hazelcast/hazelcast "3.9"]
                  [com.hazelcast/hazelcast-client "3.9"]]
-  :profiles {:dev {:source-paths ["dev"]}})
+  :profiles {:dev {:source-paths ["dev"]}
+             :test {:aot :all}})

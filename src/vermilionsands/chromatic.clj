@@ -74,7 +74,7 @@
 (defn- assoc-shared-watch [k f m]
   (update-in m [:watches k] f))
 
-(defn- remove-shared-watch [k m]
+(defn- dissoc-shared-watch [k m]
   (update m :watches dissoc k))
 
 (deftype HazelcastAtom [state notification-topic shared-ctx local-ctx]
@@ -156,7 +156,7 @@
     this)
 
   (remove-shared-watch [this k]
-    (.alter ^IAtomicReference shared-ctx (hazelcast-fn remove-shared-watch k))
+    (.alter ^IAtomicReference shared-ctx (hazelcast-fn dissoc-shared-watch k))
     this)
 
   (get-shared-watches [_]
