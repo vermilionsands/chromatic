@@ -135,15 +135,16 @@
       (swap! a inc)
       (is (= 1 (count @state-a)))
       (is (= [0 1] (first @state-a)))
-      (is (empty? @state-b)))))
-;  (testing "Local watch with notification test"
-;    (let [a (chromatic/distributed-atom hazelcast-instance "notification-test" 0 {:global-notifications true})
-;          b (chromatic/distributed-atom hazelcast-instance "notification-test" 0)
-;          [watch-a state-a] (watch-and-store)
-;          [watch-b state-b] (watch-and-store))
-;      (add-watch a :1 watch-a)
-;      (add-watch b :1 watch-b)
-;      (swap! a inc)
-;      (is (= 1 (count @state-a)))
-;      (is (= [0 1] (first @state-a)))
-;      (is (= @state-a @state-b)))))
+      (is (empty? @state-b))))
+  (testing "Local watch with notification test"
+    (let [a (chromatic/distributed-atom hazelcast-instance "notification-test" 0 {:global-notifications true})
+          b (chromatic/distributed-atom hazelcast-instance "notification-test" 0)
+          [watch-a state-a] (watch-and-store)
+          [watch-b state-b] (watch-and-store)]
+      (add-watch a :1 watch-a)
+      (add-watch b :1 watch-b)
+      (swap! a inc)
+      (Thread/sleep 200) ;; let notification topic do it's job
+      (is (= 1 (count @state-a)))
+      (is (= [0 1] (first @state-a)))
+      (is (= @state-a @state-b)))))
