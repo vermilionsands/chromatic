@@ -1,6 +1,7 @@
 (ns vermilionsands.test.chromatic
   (:require [clojure.test :refer [deftest is testing]]
-            [vermilionsands.chromatic :as chromatic])
+            [vermilionsands.chromatic :as chromatic]
+            [vermilionsands.test.util :as util])
   (:import [com.hazelcast.config Config]
            [com.hazelcast.core Hazelcast ITopic]
            [java.util.concurrent CountDownLatch]
@@ -83,10 +84,9 @@
 (deftest validator-test
   (testing "Local validator is not shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
-          b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
-          validator (partial > 10)]
-      (set-validator! a validator)
-      (is (= validator (get-validator a)))
+          b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)]
+      (set-validator! a util/less-than-10)
+      (is (= util/less-than-10 (get-validator a)))
       (is (nil? (get-validator b)))
       (swap! a inc)
       (is (= 1 @a))
@@ -98,9 +98,8 @@
       (is (= 11 @b))))
   (testing "Shared validator is shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
-          b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
-          validator (partial > 10)]
-      (chromatic/set-shared-validator! a validator)
+          b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)]
+      (chromatic/set-shared-validator! a util/less-than-10)
       (swap! a inc)
       (is (= 1 @a))
       (is (thrown? IllegalStateException (swap! a + 10)))
@@ -110,7 +109,7 @@
   (testing "Both shared and local validators are called"
     (let [a (chromatic/distributed-atom hazelcast-instance "mixed-validator-test" 0)]
       (set-validator! a even?)
-      (chromatic/set-shared-validator! a (partial > 4))
+      (chromatic/set-shared-validator! a util/less-than-4)
       ;; shared validator kicks in
       (is (thrown? IllegalStateException (swap! a + 10)))
       ;; local validator kicks in
@@ -122,7 +121,7 @@
       (swap! a conj [old-val new-val]))
      a]))
 
-(deftest watch-test
+(deftest local-watch-test
   (testing "Local watch test without notification test"
     (let [a (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
           b (chromatic/distributed-atom hazelcast-instance "watch-test" 0)

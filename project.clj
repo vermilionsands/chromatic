@@ -6,4 +6,4 @@
                  [com.hazelcast/hazelcast "3.9"]
                  [com.hazelcast/hazelcast-client "3.9"]]
   :profiles {:dev {:source-paths ["dev"]}
-             :test {:aot :all}})
+             :test {:aot [vermilionsands.test.util]}})
