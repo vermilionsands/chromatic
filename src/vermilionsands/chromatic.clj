@@ -212,7 +212,23 @@
     hazelcast-atom))
 
 (defn distributed-atom
-  ""
+  "Creates a distributed atom that uses Hazelcast to store it's state.
+
+  Accepts a Hazelcast instance, id that would be used to identify this atom,
+  initial value x and additional options map. Initial value is applied only the first
+  time an atom with given id is created on an instance.
+
+  Options:
+  :global-notifications - defaults to false, if true, would enable global notifications
+  for watches
+
+  When called for the first time (from Hazelcast point of view) it initializes Hazelcast objects,
+  sets the initial value and returns an instance of HazelcastAtom.
+
+  Further calls would return a new HazelcastAtom that reuses previously initialized objects.
+
+  If global notifications are enabled it should closed using .close() when not needed.
+  To destroy underlying distributed objects use destroy! function."
   [^HazelcastInstance instance id x & [opts]]
   (let [id (atom-id id)
         {:keys [global-notifications]} opts
