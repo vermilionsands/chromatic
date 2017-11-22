@@ -115,35 +115,40 @@
       ;; local validator kicks in
       (is (thrown? IllegalStateException (swap! a + 1))))))
 
-(defn- watch-and-store []
-  (let [a (atom [])]
-    [(fn [k x old-val new-val]
-      (swap! a conj [old-val new-val]))
-     a]))
-
 (deftest local-watch-test
   (testing "Local watch test without notification test"
     (let [a (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
           b (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
-          [watch-a state-a] (watch-and-store)
-          [watch-b state-b] (watch-and-store)]
+          [watch-a state-a] (util/watch-and-store)
+          [watch-b state-b] (util/watch-and-store)]
       (add-watch a :1 watch-a)
       (add-watch b :1 watch-b)
       (is (= {:1 watch-a} (.getWatches a)))
       (is (= {:1 watch-b} (.getWatches b)))
       (swap! a inc)
-      (is (= 1 (count @state-a)))
-      (is (= [0 1] (first @state-a)))
+      (is (= [[0 1]] @state-a))
       (is (empty? @state-b))))
   (testing "Local watch with notification test"
     (let [a (chromatic/distributed-atom hazelcast-instance "notification-test" 0 {:global-notifications true})
           b (chromatic/distributed-atom hazelcast-instance "notification-test" 0)
-          [watch-a state-a] (watch-and-store)
-          [watch-b state-b] (watch-and-store)]
-      (add-watch a :1 watch-a)
-      (add-watch b :1 watch-b)
+          [watch-a state-a] (util/watch-and-store)
+          [watch-b state-b] (util/watch-and-store)]
+      (add-watch a :local watch-a)
+      (add-watch b :local watch-b)
       (swap! a inc)
       (Thread/sleep 200) ;; let notification topic do it's job
-      (is (= 1 (count @state-a)))
-      (is (= [0 1] (first @state-a)))
+      (is (= [[0 1]] @state-a))
       (is (= @state-a @state-b)))))
+
+(deftest shared-watch-test
+  (let [a (chromatic/distributed-atom hazelcast-instance "shared-watch-test" 0 {:global-notifications true})
+        b (chromatic/distributed-atom hazelcast-instance "shared-watch-test" 0)
+        [local-watch local-state] (util/watch-and-store)]
+    (add-watch a :local local-watch)
+    (chromatic/add-shared-watch a :shared util/store-to-atom-watch)
+    (is (some? (:shared (chromatic/get-shared-watches a))))
+    (is (some? (:shared (chromatic/get-shared-watches b))))
+    (swap! a inc)
+    (Thread/sleep 200)
+    (is (= [[0 1]] @local-state))
+    (is (= [[0 1] [0 1]] @util/watch-log))))

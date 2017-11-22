@@ -72,7 +72,7 @@
   (assoc m :validator f))
 
 (defn- assoc-shared-watch [k f m]
-  (update-in m [:watches k] f))
+  (update-in m [:watches k] (constantly f)))
 
 (defn- dissoc-shared-watch [k m]
   (update m :watches dissoc k))
