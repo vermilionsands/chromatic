@@ -2,7 +2,8 @@
   (:import [clojure.lang IAtom IDeref IMeta IRef IReference]
            [com.hazelcast.config Config]
            [com.hazelcast.core HazelcastInstance IAtomicReference IFunction ITopic MessageListener]
-           [com.hazelcast.topic TopicOverloadPolicy]))
+           [com.hazelcast.topic TopicOverloadPolicy]
+           [java.io Closeable]))
 
 (def ^:private reference-service-name  "hz:impl:atomicReferenceService")
 
@@ -160,7 +161,12 @@
     this)
 
   (get-shared-watches [_]
-    (:watches (.get shared-ctx))))
+    (:watches (.get shared-ctx)))
+
+  Closeable
+  (close [_]
+    (when notification-topic
+      (.removeMessageListener ^ITopic notification-topic (:listener @local-ctx)))))
 
 (defn- find-reference [^HazelcastInstance instance id]
   (->> (.getDistributedObjects instance)
@@ -193,6 +199,18 @@
 (defn- atom-id [id]
   (str "chromatic-atom-" (name id)))
 
+(defn- add-listener! [hazelcast-atom topic]
+  (let [listener-id
+        (.addMessageListener topic
+          (reify MessageListener
+            (onMessage [_ message]
+              (let [[old-val new-val] (.getMessageObject message)]
+                (doseq [[k f] (concat (.getWatches hazelcast-atom) (get-shared-watches hazelcast-atom))]
+                  (when f
+                    (f k hazelcast-atom old-val new-val)))))))]
+    (swap! (.-local_ctx hazelcast-atom) assoc :listener listener-id)
+    hazelcast-atom))
+
 (defn distributed-atom
   ""
   [^HazelcastInstance instance id x & [opts]]
@@ -205,16 +223,7 @@
           (retrieve-shared-objects instance id))
         hazelcast-atom (->HazelcastAtom state notifications ctx (atom {}))]
 
-    ;; todo add a way to remove/deregister somehow
-    (when notifications
-      (.addMessageListener notifications
-        (reify MessageListener
-          (onMessage [_ message]
-            (let [[old-val new-val] (.getMessageObject message)]
-              (doseq [[k f] (concat (.getWatches hazelcast-atom) (get-shared-watches hazelcast-atom))]
-                (when f
-                  (f k hazelcast-atom old-val new-val))))))))
-
+    (some->> notifications (add-listener! hazelcast-atom))
     hazelcast-atom))
 
 (defn destroy!
