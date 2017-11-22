@@ -71,7 +71,7 @@ Notifications are implemented using `ReliableTopic`. Each notification is a vect
  
 ##### metadata
 
-Metadata is stored on instance and is not shared
+Metadata is stored on instance and is not shared.
 
 ##### misc
   
