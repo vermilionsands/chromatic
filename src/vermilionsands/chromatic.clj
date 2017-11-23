@@ -1,7 +1,7 @@
 (ns vermilionsands.chromatic
   (:import [clojure.lang IAtom IDeref IMeta IRef IReference]
            [com.hazelcast.config Config]
-           [com.hazelcast.core HazelcastInstance IAtomicReference IFunction ITopic MessageListener]
+           [com.hazelcast.core HazelcastInstance IAtomicReference IFunction ITopic MessageListener ILock]
            [com.hazelcast.topic TopicOverloadPolicy]
            [java.io Closeable]))
 
@@ -183,18 +183,20 @@
 
 (defn- init-shared-objects [instance id init notifications?]
   (let [lock (.getLock instance id)]
-    (when-not (find-reference instance id)
-      (let [state         (.getAtomicReference instance id)
-            ctx           (.getAtomicReference instance (str id "-ctx"))
-            notifications (when notifications? (.getReliableTopic instance id))]
-        (.set ^IAtomicReference state init)
-        (.set ^IAtomicReference ctx {:notifications? notifications?})
-        (when notifications?
-          (-> (.getReliableTopicConfig (Config.) id)
-              (.setTopicOverloadPolicy TopicOverloadPolicy/DISCARD_OLDEST)
-              (.setStatisticsEnabled false)))
-        (.destroy lock)
-        {:state state :ctx ctx :notifications notifications}))))
+    (.lock ^ILock lock)
+    (try
+      (when-not (find-reference instance id)
+        (let [state         (.getAtomicReference instance id)
+              ctx           (.getAtomicReference instance (str id "-ctx"))
+              notifications (when notifications? (.getReliableTopic instance id))]
+          (.set ^IAtomicReference state init)
+          (.set ^IAtomicReference ctx {:notifications? notifications?})
+          (when notifications?
+            (-> (.getReliableTopicConfig (Config.) id)
+                (.setTopicOverloadPolicy TopicOverloadPolicy/DISCARD_OLDEST)
+                (.setStatisticsEnabled false)))
+          {:state state :ctx ctx :notifications notifications}))
+      (finally (.unlock ^ILock lock)))))
 
 (defn- atom-id [id]
   (str "chromatic-atom-" (name id)))
