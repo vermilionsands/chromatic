@@ -1,4 +1,4 @@
-(defproject vermilionsands/chromatic "0.0.1"
+(defproject vermilionsands/chromatic "0.1.0"
   :description "Distributed atom-like reference type backed by Hazelcast"
   :url "https://github.com/vermilionsands/chromatic"
   :license {:name "Eclipse Public License"
