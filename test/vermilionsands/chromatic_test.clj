@@ -1,7 +1,7 @@
-(ns vermilionsands.test.chromatic
+(ns vermilionsands.chromatic_test
   (:require [clojure.test :refer [deftest is testing]]
             [vermilionsands.chromatic :as chromatic]
-            [vermilionsands.test.util :as util])
+            [vermilionsands.test-helpers :as test-helpers])
   (:import [com.hazelcast.config Config]
            [com.hazelcast.core Hazelcast ITopic]
            [java.util.concurrent CountDownLatch]
@@ -40,14 +40,14 @@
       (is (= 11 (swap! a + 1 1 1 1))))
     (testing "Multiple swaps"
       (reset! a 0)
-      (let [n 1000
+      (let [n 100
             start (CountDownLatch. 1)
             done (CountDownLatch. n)]
         (doseq [_ (range n)]
           (future-swap start done a inc))
         (.countDown start)
         (.await done)
-        (is (= 1000 @a))))))
+        (is (= 100 @a))))))
 
 (deftest reset-test
   (let [a (chromatic/distributed-atom hazelcast-instance "reset-test" 0)]
@@ -85,8 +85,8 @@
   (testing "Local validator is not shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)
           b (chromatic/distributed-atom hazelcast-instance "local-validator-test" 0)]
-      (set-validator! a util/less-than-10)
-      (is (= util/less-than-10 (get-validator a)))
+      (set-validator! a test-helpers/less-than-10)
+      (is (= test-helpers/less-than-10 (get-validator a)))
       (is (nil? (get-validator b)))
       (swap! a inc)
       (is (= 1 @a))
@@ -99,7 +99,7 @@
   (testing "Shared validator is shared between instances"
     (let [a (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)
           b (chromatic/distributed-atom hazelcast-instance "shared-validator-test" 0)]
-      (chromatic/set-shared-validator! a util/less-than-10)
+      (chromatic/set-shared-validator! a test-helpers/less-than-10)
       (swap! a inc)
       (is (= 1 @a))
       (is (thrown? IllegalStateException (swap! a + 10)))
@@ -109,7 +109,7 @@
   (testing "Both shared and local validators are called"
     (let [a (chromatic/distributed-atom hazelcast-instance "mixed-validator-test" 0)]
       (set-validator! a even?)
-      (chromatic/set-shared-validator! a util/less-than-4)
+      (chromatic/set-shared-validator! a test-helpers/less-than-4)
       ;; shared validator kicks in
       (is (thrown? IllegalStateException (swap! a + 10)))
       ;; local validator kicks in
@@ -119,8 +119,8 @@
   (testing "Local watch test without notification test"
     (let [a (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
           b (chromatic/distributed-atom hazelcast-instance "watch-test" 0)
-          [watch-a state-a] (util/watch-and-store)
-          [watch-b state-b] (util/watch-and-store)]
+          [watch-a state-a] (test-helpers/watch-and-store)
+          [watch-b state-b] (test-helpers/watch-and-store)]
       (add-watch a :1 watch-a)
       (add-watch b :1 watch-b)
       (is (= {:1 watch-a} (.getWatches a)))
@@ -131,8 +131,8 @@
   (testing "Local watch with notification test"
     (let [a (chromatic/distributed-atom hazelcast-instance "notification-test" 0 {:global-notifications true})
           b (chromatic/distributed-atom hazelcast-instance "notification-test" 0)
-          [watch-a state-a] (util/watch-and-store)
-          [watch-b state-b] (util/watch-and-store)]
+          [watch-a state-a] (test-helpers/watch-and-store)
+          [watch-b state-b] (test-helpers/watch-and-store)]
       (add-watch a :local watch-a)
       (add-watch b :local watch-b)
       (swap! a inc)
@@ -143,12 +143,12 @@
 (deftest shared-watch-test
   (let [a (chromatic/distributed-atom hazelcast-instance "shared-watch-test" 0 {:global-notifications true})
         b (chromatic/distributed-atom hazelcast-instance "shared-watch-test" 0)
-        [local-watch local-state] (util/watch-and-store)]
+        [local-watch local-state] (test-helpers/watch-and-store)]
     (add-watch a :local local-watch)
-    (chromatic/add-shared-watch a :shared util/store-to-atom-watch)
+    (chromatic/add-shared-watch a :shared test-helpers/store-to-atom-watch)
     (is (some? (:shared (chromatic/get-shared-watches a))))
     (is (some? (:shared (chromatic/get-shared-watches b))))
     (swap! a inc)
     (Thread/sleep 200)
     (is (= [[0 1]] @local-state))
-    (is (= [[0 1] [0 1]] @util/watch-log))))
+    (is (= [[0 1] [0 1]] @test-helpers/watch-log))))

@@ -1,4 +1,4 @@
-(ns vermilionsands.test.util)
+(ns vermilionsands.test-helpers)
 
 (defn less-than-10 [x] (< x 10))
 

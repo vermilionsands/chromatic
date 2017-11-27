@@ -104,7 +104,7 @@
     (let [old-val (deref this)]
       (validate (:validator @local-ctx) new-val)
       (validate (:validator (.get shared-ctx)) new-val)
-      @(.setAsync state new-val)
+      (.set state new-val)
       (notify this old-val new-val)
       new-val))
 
@@ -186,9 +186,9 @@
     (.lock ^ILock lock)
     (try
       (when-not (find-reference instance id)
-        (let [state         (.getAtomicReference instance id)
+        (let [notifications (when notifications? (.getReliableTopic instance id))
               ctx           (.getAtomicReference instance (str id "-ctx"))
-              notifications (when notifications? (.getReliableTopic instance id))]
+              state         (.getAtomicReference instance id)]
           (.set ^IAtomicReference state init)
           (.set ^IAtomicReference ctx {:notifications? notifications?})
           (when notifications?
