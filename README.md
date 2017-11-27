@@ -2,9 +2,9 @@
 
 Atom-like reference type, that uses Hazelcast to store it's state in a distributed fashion. 
 
-## Caveat emptor
+## Dependency
 
-This is work in progress.
+[![Clojars Project](https://img.shields.io/clojars/v/vermilionsands/chromatic.svg)](https://clojars.org/vermilionsands/chromatic)
 
 ## Usage
 
